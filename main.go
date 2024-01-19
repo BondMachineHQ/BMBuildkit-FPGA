@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/google/go-containerregistry/pkg/crane"
 	cranev1 "github.com/google/go-containerregistry/pkg/v1"
@@ -13,31 +14,42 @@ type BMBuildkit struct {
 }
 
 // example usage: "dagger call build --device-spec lattice/ice40/yosys --target dciangot/my_fpga_firmware:v1 --context ./examples/blinky/ice40 "
-func (m *BMBuildkit) Build(ctx context.Context, deviceSpec string, target string, contextDir *Directory, imageRef Optional[string], push Optional[bool], appendManifest Optional[bool]) (string, error) {
+func (m *BMBuildkit) Build(ctx context.Context, deviceSpec string, target string, contextDir string, imageRef Optional[string], push Optional[bool], appendManifest Optional[bool]) (string, error) {
 
 	//docker run -e MODULE_NAME=blinky -e SYNTH_FILE=blinky.v -v $PWD/examples/blinky:/opt/source -ti dciangot/yosys bash
+
+	ctxDir := dag.Host().Directory(contextDir)
+
+	tmpDir := os.TempDir()
 
 	pushing := push.GetOr(false)
 	if pushing {
 		_, err := dag.Container().
 			From("dciangot/yosys:latest").
-			WithMountedDirectory("/opt/source", contextDir).
-			WithWorkdir("/opt/context").
-			WithExec([]string{"ls", "-altrh"}).
-			Stdout(ctx)
+			WithDirectory("/opt/source", ctxDir).
+			WithEnvVariable("MODULE_NAME", "blinky").
+			WithEnvVariable("SYNTH_FILE", "blinky.v").
+			WithExec([]string{"make"}).
+			Directory("/opt/source").
+			Export(ctx, tmpDir)
 		if err != nil {
 			return "", err
 		}
 
-		return m.Push(ctx, contextDir.File("firmware.bin"), deviceSpec, target, contextDir, appendManifest)
+		ctxDir = dag.Host().Directory(tmpDir)
+
+		return m.Push(ctx, ctxDir.File("firmware.bin"), deviceSpec, target, ctxDir, appendManifest)
 	}
 
 	return dag.Container().
 		From("dciangot/yosys:latest").
-		WithMountedDirectory("/opt/source", contextDir).
-		WithWorkdir("/opt/context").
-		WithExec([]string{"ls", "-altrh"}).
+		//WithMountedDirectory("/opt/source", ctxDir).
+		WithDirectory("/opt/source", ctxDir).
+		WithEnvVariable("MODULE_NAME", "blinky").
+		WithEnvVariable("SYNTH_FILE", "blinky.v").
+		WithExec([]string{"make"}).
 		Stdout(ctx)
+
 }
 
 // example usage: "dagger call push --target dciangot/my_fpga_firmware:v1 --firmware ./examples/blinky/ice40/firmware.bin --bring-context ./examples/blinky/ice40 --device-spec lattice/ice40/yosys"
@@ -56,7 +68,7 @@ func (m *BMBuildkit) Push(ctx context.Context, firmware *File, deviceSpec string
 			if platform == "bm/context" {
 				ctr := dag.Container(ContainerOpts{Platform: platform}).
 					//WithLabel("org.opencontainers.image.lattice.ice40", "").
-					WithDirectory("/firmware.bin", bringContext)
+					WithDirectory("/context", bringContext)
 				platformVariants = append(platformVariants, ctr)
 			} else {
 				ctr := dag.Container(ContainerOpts{Platform: platform}).
