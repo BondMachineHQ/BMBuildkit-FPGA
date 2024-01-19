@@ -20,10 +20,12 @@ func (m *BMBuildkit) Build(ctx context.Context, deviceSpec string, target string
 
 	tmpDir := os.TempDir()
 
+	img := imageRef.GetOr("dciangot/yosys:latest")
+
 	pushing := push.GetOr(false)
 	if pushing {
 		_, err := dag.Container().
-			From("dciangot/yosys:latest").
+			From(img).
 			WithDirectory("/opt/source", contextDir).
 			WithEnvVariable("MODULE_NAME", "blinky").
 			WithEnvVariable("SYNTH_FILE", "blinky.v").
@@ -39,14 +41,19 @@ func (m *BMBuildkit) Build(ctx context.Context, deviceSpec string, target string
 		return m.Push(ctx, firmwareDir.File("firmware.bin"), deviceSpec, target, firmwareDir, appendManifest)
 	}
 
-	return dag.Container().
-		From("dciangot/yosys:latest").
-		//WithMountedDirectory("/opt/source", ctxDir).
+	_, err := dag.Container().
+		From(img).
 		WithDirectory("/opt/source", contextDir).
 		WithEnvVariable("MODULE_NAME", "blinky").
 		WithEnvVariable("SYNTH_FILE", "blinky.v").
-		WithExec([]string{"make"}).
-		Stdout(ctx)
+		WithExec([]string{"bash", "-c", "make && mkdir /opt/output && cp -r /opt/source/* /opt/output"}).
+		Directory("/opt/output").
+		Export(ctx, "./")
+	if err != nil {
+		return "", err
+	}
+
+	return tmpDir, nil
 
 }
 
