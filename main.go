@@ -14,11 +14,9 @@ type BMBuildkit struct {
 }
 
 // example usage: "dagger call build --device-spec lattice/ice40/yosys --target dciangot/my_fpga_firmware:v1 --context ./examples/blinky/ice40 "
-func (m *BMBuildkit) Build(ctx context.Context, deviceSpec string, target string, contextDir string, imageRef Optional[string], push Optional[bool], appendManifest Optional[bool]) (string, error) {
+func (m *BMBuildkit) Build(ctx context.Context, deviceSpec string, target string, contextDir *Directory, imageRef Optional[string], push Optional[bool], appendManifest Optional[bool]) (string, error) {
 
 	//docker run -e MODULE_NAME=blinky -e SYNTH_FILE=blinky.v -v $PWD/examples/blinky:/opt/source -ti dciangot/yosys bash
-
-	ctxDir := dag.Host().Directory(contextDir)
 
 	tmpDir := os.TempDir()
 
@@ -26,7 +24,7 @@ func (m *BMBuildkit) Build(ctx context.Context, deviceSpec string, target string
 	if pushing {
 		_, err := dag.Container().
 			From("dciangot/yosys:latest").
-			WithDirectory("/opt/source", ctxDir).
+			WithDirectory("/opt/source", contextDir).
 			WithEnvVariable("MODULE_NAME", "blinky").
 			WithEnvVariable("SYNTH_FILE", "blinky.v").
 			WithExec([]string{"make"}).
@@ -36,15 +34,15 @@ func (m *BMBuildkit) Build(ctx context.Context, deviceSpec string, target string
 			return "", err
 		}
 
-		ctxDir = dag.Host().Directory(tmpDir)
+		firmwareDir := dag.Host().Directory(tmpDir)
 
-		return m.Push(ctx, ctxDir.File("firmware.bin"), deviceSpec, target, ctxDir, appendManifest)
+		return m.Push(ctx, firmwareDir.File("firmware.bin"), deviceSpec, target, firmwareDir, appendManifest)
 	}
 
 	return dag.Container().
 		From("dciangot/yosys:latest").
 		//WithMountedDirectory("/opt/source", ctxDir).
-		WithDirectory("/opt/source", ctxDir).
+		WithDirectory("/opt/source", contextDir).
 		WithEnvVariable("MODULE_NAME", "blinky").
 		WithEnvVariable("SYNTH_FILE", "blinky.v").
 		WithExec([]string{"make"}).
